@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Pick a Parking Destination</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" />
+  <style>
+    html, body, #map {
+      height: 100%;
+      margin: 0;
+      padding: 0;
+    }
+    #coords {
+      position: absolute;
+      bottom: 60px;
+      left: 10px;
+      background: white;
+      padding: 6px 12px;
+      font-size: 14px;
+      z-index: 1000;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+      border-radius: 4px;
+    }
+    #loadButton {
+      position: absolute;
+      bottom: 10px;
+      left: 10px;
+      background: #007bff;
+      color: white;
+      border: none;
+      padding: 8px 16px;
+      font-size: 14px;
+      border-radius: 4px;
+      cursor: pointer;
+      z-index: 1001;
+      display: none;
+    }
+    .selection-button {
+      margin-top: 8px;
+      display: inline-block;
+      padding: 6px 12px;
+      background-color: #007bff;
+      color: white;
+      border-radius: 4px;
+      text-align: center;
+      cursor: pointer;
+      text-decoration: none;
+    }
+  </style>
+</head>
+<body>
+
+<div id="map"></div>
+<div id="coords">Click anywhere in Vancouver to start</div>
+<button id="loadButton">Find Nearby Parking</button>
+
+<script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
+<script>
+  const map = L.map('map').setView([49.25, -123.1], 13);
+
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 18,
+    attribution: 'Map data © OpenStreetMap contributors'
+  }).addTo(map);
+
+  const coordsDisplay = document.getElementById('coords');
+  const loadButton = document.getElementById('loadButton');
+  let marker = null;
+  let resultMarkers = L.layerGroup().addTo(map);
+  let selectedPoint = null;
+
+  async function queryNearbyPoints(x, y) {
+    const url = `https://sm-beta-fme-server-support.fmecloud.com/api/vancity/parking?X=${x}&Y=${y}`;
+    console.log("Calling API:", url);
+
+    try {
+      const response = await fetch(url);
+      const data = await response.json();
+
+      resultMarkers.clearLayers();
+
+      data.forEach((item, index) => {
+        const lat = item.coordy;
+        const lng = item.coordx;
+
+        if (isFinite(lat) && isFinite(lng)) {
+          const gmapUrl = `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`;
+          const popup = `
+            <b>Point ${index + 1}</b><br>
+            <b>Lat:</b> ${lat}<br>
+            <b>Lng:</b> ${lng}<br><br>
+            <a href="${gmapUrl}" target="_blank" class="selection-button">Navigate Here</a>
+          `;
+          L.marker([lat, lng]).addTo(resultMarkers).bindPopup(popup);
+        }
+      });
+
+    } catch (err) {
+      console.error("Failed to fetch points:", err);
+      alert("Error loading nearby points.");
+    }
+  }
+
+  map.on('click', function(e) {
+    const { lat, lng } = e.latlng;
+    selectedPoint = { lat, lng };
+
+    coordsDisplay.innerText = `Selected: Latitude ${lat.toFixed(6)}, Longitude ${lng.toFixed(6)}`;
+    loadButton.style.display = 'inline-block';
+
+    if (marker) {
+      marker.setLatLng(e.latlng);
+    } else {
+      marker = L.marker(e.latlng).addTo(map);
+    }
+  });
+
+  loadButton.addEventListener('click', () => {
+    if (selectedPoint) {
+      queryNearbyPoints(selectedPoint.lng, selectedPoint.lat); // X = lng, Y = lat
+    }
+  });
+</script>
+
+</body>
+</html>
