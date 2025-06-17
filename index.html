@@ -4,10 +4,10 @@
   <title>Pick a Parking Destination</title>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  
+
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.css" />
-  
+
   <style>
     html, body, #map { height: 100%; margin: 0; padding: 0; }
 
@@ -139,6 +139,8 @@
   let searchMarker = null;
   let stopPoint = null;
   let destinationPoint = null;
+  let freeSelectionMarker = null;
+  let dataLoaded = false;
 
   const defaultIcon = L.icon({
     iconUrl: 'https://unpkg.com/leaflet@1.9.3/dist/images/marker-icon.png',
@@ -173,9 +175,28 @@
       searchMarker = null;
     }
 
+    if (freeSelectionMarker) {
+      map.removeLayer(freeSelectionMarker);
+    }
+
     coordsDisplay.innerText = `Searching parking near: Latitude ${lat.toFixed(6)}, Longitude ${lng.toFixed(6)}`;
     loadButton.style.display = 'inline-block';
+
+    if (dataLoaded) {
+      freeSelectionMarker = L.marker([lat, lng], { icon: defaultIcon }).addTo(map);
+      freeSelectionMarker.bindPopup(popupContentForLatLng(lat, lng)).openPopup();
+    }
   });
+
+  function popupContentForLatLng(lat, lng) {
+    return `
+      <b>Custom Location</b><br>
+      Lat: ${lat.toFixed(6)}<br>
+      Lng: ${lng.toFixed(6)}<br><br>
+      <button class="popup-button" onclick="setAsStop(${lat}, ${lng}, 'Custom', 'N/A')">Set as Stop</button>
+      <button class="popup-button" onclick="setAsDestination(${lat}, ${lng}, 'Custom', 'N/A')">Set as Destination</button>
+    `;
+  }
 
   loadButton.addEventListener('click', () => {
     if (selectedPoint) {
@@ -213,8 +234,9 @@
       polygonLayer.clearLayers();
       stopPoint = null;
       destinationPoint = null;
+      dataLoaded = true;
 
-      coordsDisplay.innerText = "Click a marker and choose stop or destination.";
+      coordsDisplay.innerText = "Click a marker or anywhere on map to choose stop or destination.";
 
       (data.body || data).forEach((item, index) => {
         if ('coordx' in item && 'coordy' in item) {
@@ -229,8 +251,8 @@
               <b>Point ${index + 1}</b><br>
               Rate: ${rate}<br>
               Parking Time: ${time}<br><br>
-              <button class="popup-button" onclick="setAsStop(${lat}, ${lng}, '${rate}', '${time}', this)">Set as Stop</button>
-              <button class="popup-button" onclick="setAsDestination(${lat}, ${lng}, '${rate}', '${time}', this)">Set as Destination</button>
+              <button class="popup-button" onclick="setAsStop(${lat}, ${lng}, '${rate}', '${time}')">Set as Stop</button>
+              <button class="popup-button" onclick="setAsDestination(${lat}, ${lng}, '${rate}', '${time}')">Set as Destination</button>
             `);
           }
         } else if ('resident parking zone' in item) {
