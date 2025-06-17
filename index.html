@@ -4,28 +4,33 @@
   <title>Pick a Parking Destination</title>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.css" />
+  
   <style>
-    html, body, #map {
-      height: 100%;
-      margin: 0;
-      padding: 0;
-    }
-    #coords {
-      position: absolute;
-      bottom: 60px;
-      left: 10px;
-      background: white;
-      padding: 6px 12px;
-      font-size: 14px;
-      z-index: 1000;
-      box-shadow: 0 2px 6px rgba(0,0,0,0.3);
-      border-radius: 4px;
-    }
-    #loadButton {
+    html, body, #map { height: 100%; margin: 0; padding: 0; }
+
+    #uiContainer {
       position: absolute;
       bottom: 10px;
       left: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      z-index: 1000;
+      max-width: 300px;
+    }
+
+    #coords {
+      background: white;
+      padding: 6px 12px;
+      font-size: 14px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+      border-radius: 4px;
+    }
+
+    #loadButton {
       background: #007bff;
       color: white;
       border: none;
@@ -33,9 +38,29 @@
       font-size: 14px;
       border-radius: 4px;
       cursor: pointer;
-      z-index: 1001;
       display: none;
     }
+
+    #inputPanel {
+      background: white;
+      padding: 10px;
+      border-radius: 4px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+      font-size: 14px;
+    }
+
+    input {
+      margin-top: 4px;
+      margin-bottom: 6px;
+      width: 100%;
+      padding: 4px;
+    }
+
+    label {
+      display: block;
+      margin-bottom: 2px;
+    }
+
     .selection-button {
       margin-top: 8px;
       display: inline-block;
@@ -47,15 +72,45 @@
       cursor: pointer;
       text-decoration: none;
     }
+
+    .popup-button {
+      display: inline-block;
+      margin-top: 5px;
+      margin-right: 4px;
+      padding: 4px 8px;
+      background-color: #007bff;
+      color: white;
+      font-size: 12px;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+    }
   </style>
 </head>
 <body>
 
 <div id="map"></div>
-<div id="coords">Click anywhere in Vancouver to start</div>
-<button id="loadButton">Find Nearby Parking</button>
+
+<div id="uiContainer">
+  <div id="coords">Click or search anywhere in Vancouver to search for parking.</div>
+
+  <button id="loadButton">Find Nearby Parking</button>
+
+  <div id="inputPanel">
+    <label for="arrivalTimeInput">Estimated Arrival Time:</label>
+    <input type="time" id="arrivalTimeInput" required>
+
+    <label for="maxRateInput">Max Parking Rate ($/hr):</label>
+    <input type="number" step="0.01" id="maxRateInput" required>
+
+    <label for="parkingDistanceInput">Parking Distance (meters):</label>
+    <input type="number" step="1" id="parkingDistanceInput" required>
+  </div>
+</div>
 
 <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.js"></script>
+
 <script>
   const map = L.map('map').setView([49.25, -123.1], 13);
 
@@ -66,61 +121,179 @@
 
   const coordsDisplay = document.getElementById('coords');
   const loadButton = document.getElementById('loadButton');
-  let marker = null;
-  let resultMarkers = L.layerGroup().addTo(map);
-  let selectedPoint = null;
+  const arrivalTimeInput = document.getElementById('arrivalTimeInput');
+  const maxRateInput = document.getElementById('maxRateInput');
+  const parkingDistanceInput = document.getElementById('parkingDistanceInput');
 
-  async function queryNearbyPoints(x, y) {
-    const url = `https://sm-beta-fme-server-support.fmecloud.com/api/vancity/parking?X=${x}&Y=${y}`;
-    console.log("Calling API:", url);
-
-    try {
-      const response = await fetch(url);
-      const data = await response.json();
-
-      resultMarkers.clearLayers();
-
-      data.forEach((item, index) => {
-        const lat = item.coordy;
-        const lng = item.coordx;
-
-        if (isFinite(lat) && isFinite(lng)) {
-          const gmapUrl = `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`;
-          const popup = `
-            <b>Point ${index + 1}</b><br>
-            <b>Lat:</b> ${lat}<br>
-            <b>Lng:</b> ${lng}<br><br>
-            <a href="${gmapUrl}" target="_blank" class="selection-button">Navigate Here</a>
-          `;
-          L.marker([lat, lng]).addTo(resultMarkers).bindPopup(popup);
-        }
-      });
-
-    } catch (err) {
-      console.error("Failed to fetch points:", err);
-      alert("Error loading nearby points.");
+  const resultMarkers = L.layerGroup().addTo(map);
+  const polygonLayer = L.geoJSON(null, {
+    style: {
+      color: '#FF3333',
+      fillColor: '#FF9999',
+      weight: 2,
+      fillOpacity: 0.4
     }
-  }
+  }).addTo(map);
+
+  let selectedPoint = null;
+  let searchMarker = null;
+  let stopPoint = null;
+  let destinationPoint = null;
+
+  const defaultIcon = L.icon({
+    iconUrl: 'https://unpkg.com/leaflet@1.9.3/dist/images/marker-icon.png',
+    iconSize: [25, 41],
+    iconAnchor: [12, 41],
+    popupAnchor: [1, -34],
+    shadowUrl: 'https://unpkg.com/leaflet@1.9.3/dist/images/marker-shadow.png',
+    shadowSize: [41, 41]
+  });
+
+  L.Control.geocoder({ defaultMarkGeocode: false })
+    .on('markgeocode', function(e) {
+      const { center, name } = e.geocode;
+      const { lat, lng } = center;
+
+      if (searchMarker) map.removeLayer(searchMarker);
+      searchMarker = L.marker(center, { icon: defaultIcon }).addTo(map);
+      map.setView(center, 16);
+
+      selectedPoint = { lat, lng };
+      coordsDisplay.innerText = `Searching parking near: ${name} (${lat.toFixed(6)}, ${lng.toFixed(6)})`;
+      loadButton.style.display = 'inline-block';
+    })
+    .addTo(map);
 
   map.on('click', function(e) {
     const { lat, lng } = e.latlng;
     selectedPoint = { lat, lng };
 
-    coordsDisplay.innerText = `Selected: Latitude ${lat.toFixed(6)}, Longitude ${lng.toFixed(6)}`;
-    loadButton.style.display = 'inline-block';
-
-    if (marker) {
-      marker.setLatLng(e.latlng);
-    } else {
-      marker = L.marker(e.latlng).addTo(map);
+    if (searchMarker) {
+      map.removeLayer(searchMarker);
+      searchMarker = null;
     }
+
+    coordsDisplay.innerText = `Searching parking near: Latitude ${lat.toFixed(6)}, Longitude ${lng.toFixed(6)}`;
+    loadButton.style.display = 'inline-block';
   });
 
   loadButton.addEventListener('click', () => {
     if (selectedPoint) {
-      queryNearbyPoints(selectedPoint.lng, selectedPoint.lat); // X = lng, Y = lat
+      queryNearbyPoints(selectedPoint.lng, selectedPoint.lat);
+    } else {
+      alert("Please select a destination by clicking the map or searching.");
     }
   });
+
+  function getCurrentDayOfWeek() {
+    const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+    return days[new Date().getDay()];
+  }
+
+  async function queryNearbyPoints(x, y) {
+    const userArrivalTime = arrivalTimeInput.value;
+    const maxRate = encodeURIComponent(maxRateInput.value);
+    const parkingDistance = encodeURIComponent(parkingDistanceInput.value);
+    const dayOfWeek = encodeURIComponent(getCurrentDayOfWeek());
+
+    if (!userArrivalTime || !maxRate || !parkingDistance) {
+      alert("Please fill in all fields: arrival time, max rate, and parking distance.");
+      return;
+    }
+
+    let url = `https://sm-beta-fme-server-support.fmecloud.com/api/vancity/parking?X=${x}&Y=${y}&userArrivalTime=${userArrivalTime}&maxRate=${maxRate}&parkingDistance=${parkingDistance}&dayOfWeek=${dayOfWeek}`;
+    console.log("Calling API:", url);
+
+    try {
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json();
+
+      resultMarkers.clearLayers();
+      polygonLayer.clearLayers();
+      stopPoint = null;
+      destinationPoint = null;
+
+      coordsDisplay.innerText = "Click a marker and choose stop or destination.";
+
+      (data.body || data).forEach((item, index) => {
+        if ('coordx' in item && 'coordy' in item) {
+          const lat = item.coordy;
+          const lng = item.coordx;
+          const rate = item.rate || "N/A";
+          const time = item["parking time"] || "N/A";
+
+          if (isFinite(lat) && isFinite(lng)) {
+            const marker = L.marker([lat, lng], { icon: defaultIcon }).addTo(resultMarkers);
+            marker.bindPopup(`
+              <b>Point ${index + 1}</b><br>
+              Rate: ${rate}<br>
+              Parking Time: ${time}<br><br>
+              <button class="popup-button" onclick="setAsStop(${lat}, ${lng}, '${rate}', '${time}', this)">Set as Stop</button>
+              <button class="popup-button" onclick="setAsDestination(${lat}, ${lng}, '${rate}', '${time}', this)">Set as Destination</button>
+            `);
+          }
+        } else if ('resident parking zone' in item) {
+          try {
+            const geojson = JSON.parse(item['resident parking zone']);
+            L.geoJSON(geojson, {
+              style: {
+                color: '#FF0000',
+                fillColor: '#FFCCCC',
+                weight: 2,
+                fillOpacity: 0.35
+              }
+            }).addTo(polygonLayer);
+          } catch (e) {
+            console.warn("Invalid polygon skipped:", e);
+          }
+        }
+      });
+    } catch (err) {
+      console.error("Failed to fetch points:", err);
+      alert("Error loading nearby points: " + err.message);
+    }
+  }
+
+  window.setAsStop = function(lat, lng, rate, time) {
+    stopPoint = { lat, lng, rate, time };
+    coordsDisplay.innerText = `Stop selected: ${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+    updateRouteDisplay();
+  }
+
+  window.setAsDestination = function(lat, lng, rate, time) {
+    destinationPoint = { lat, lng, rate, time };
+    coordsDisplay.innerText = `Destination selected: ${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+    updateRouteDisplay();
+  }
+
+  function updateRouteDisplay() {
+    if (stopPoint && destinationPoint) {
+      if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(position => {
+          const originLat = position.coords.latitude;
+          const originLng = position.coords.longitude;
+          const gmapUrl = `https://www.google.com/maps/dir/?api=1&origin=${originLat},${originLng}&destination=${destinationPoint.lat},${destinationPoint.lng}&waypoints=${stopPoint.lat},${stopPoint.lng}`;
+          coordsDisplay.innerHTML = `
+            <b>Current Location → Stop → Destination</b><br><br>
+            <b>Stop:</b><br>
+            Location: ${stopPoint.lat.toFixed(5)}, ${stopPoint.lng.toFixed(5)}<br>
+            Rate: ${stopPoint.rate}<br>
+            Time: ${stopPoint.time}<br><br>
+
+            <b>Destination:</b><br>
+            Location: ${destinationPoint.lat.toFixed(5)}, ${destinationPoint.lng.toFixed(5)}<br>
+            Rate: ${destinationPoint.rate}<br>
+            Time: ${destinationPoint.time}<br><br>
+
+            <a href="${gmapUrl}" target="_blank" class="selection-button">Navigate in Google Maps</a>
+          `;
+        }, () => alert("Geolocation failed. Please allow location access."));
+      } else {
+        alert("Geolocation is not supported by this browser.");
+      }
+    }
+  }
 </script>
 
 </body>
