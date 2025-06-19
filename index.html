@@ -4,13 +4,10 @@
   <title>Pick a Parking Destination</title>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" />
   <link rel="stylesheet" href="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.css" />
-
   <style>
     html, body, #map { height: 100%; margin: 0; padding: 0; }
-
     #uiContainer {
       position: absolute;
       bottom: 10px;
@@ -21,7 +18,6 @@
       z-index: 1000;
       max-width: 300px;
     }
-
     #coords {
       background: white;
       padding: 6px 12px;
@@ -29,7 +25,6 @@
       box-shadow: 0 2px 6px rgba(0,0,0,0.3);
       border-radius: 4px;
     }
-
     #loadButton {
       background: #007bff;
       color: white;
@@ -40,7 +35,6 @@
       cursor: pointer;
       display: none;
     }
-
     #inputPanel {
       background: white;
       padding: 10px;
@@ -48,19 +42,16 @@
       box-shadow: 0 2px 6px rgba(0,0,0,0.3);
       font-size: 14px;
     }
-
     input {
       margin-top: 4px;
       margin-bottom: 6px;
       width: 100%;
       padding: 4px;
     }
-
     label {
       display: block;
       margin-bottom: 2px;
     }
-
     .selection-button {
       margin-top: 8px;
       display: inline-block;
@@ -72,7 +63,6 @@
       cursor: pointer;
       text-decoration: none;
     }
-
     .popup-button {
       display: inline-block;
       margin-top: 5px;
@@ -93,16 +83,12 @@
 
 <div id="uiContainer">
   <div id="coords">Click or search anywhere in Vancouver to search for parking.</div>
-
   <button id="loadButton">Find Nearby Parking</button>
-
   <div id="inputPanel">
     <label for="arrivalTimeInput">Estimated Arrival Time:</label>
     <input type="time" id="arrivalTimeInput" required>
-
     <label for="maxRateInput">Max Parking Rate ($/hr):</label>
     <input type="number" step="0.01" id="maxRateInput" required>
-
     <label for="parkingDistanceInput">Parking Distance (meters):</label>
     <input type="number" step="1" id="parkingDistanceInput" required>
   </div>
@@ -139,7 +125,6 @@
   let searchMarker = null;
   let stopPoint = null;
   let destinationPoint = null;
-  let freeSelectionMarker = null;
   let dataLoaded = false;
 
   const defaultIcon = L.icon({
@@ -180,8 +165,6 @@
     selectedPoint = { lat, lng };
 
     if (searchMarker) map.removeLayer(searchMarker);
-    if (freeSelectionMarker) map.removeLayer(freeSelectionMarker);
-
     searchMarker = L.marker([lat, lng], { icon: redIcon }).addTo(map);
 
     coordsDisplay.innerText = `Searching parking near: Latitude ${lat.toFixed(6)}, Longitude ${lng.toFixed(6)}`;
@@ -240,7 +223,7 @@
       destinationPoint = null;
       dataLoaded = true;
 
-      coordsDisplay.innerText = "Click a marker or anywhere on map to choose stop or destination.";
+      let parkingStationCount = 0;
 
       (data.body || data).forEach((item, index) => {
         if ('coordx' in item && 'coordy' in item) {
@@ -258,16 +241,17 @@
               <button class="popup-button" onclick="setAsStop(${lat}, ${lng}, '${rate}', '${time}')">Set as Stop</button>
               <button class="popup-button" onclick="setAsDestination(${lat}, ${lng}, '${rate}', '${time}')">Set as Destination</button>
             `);
+            parkingStationCount++;
           }
         } else if ('resident parking zone' in item) {
           try {
             const geojson = JSON.parse(item['resident parking zone']);
             L.geoJSON(geojson, {
               style: {
-                color: '#FF0000',
-                fillColor: '#FFCCCC',
+                color: '#FF8800',
+                fillColor: '#FFDD99',
                 weight: 2,
-                fillOpacity: 0.35
+                fillOpacity: 0.3
               }
             }).addTo(polygonLayer);
           } catch (e) {
@@ -275,6 +259,13 @@
           }
         }
       });
+
+      if (parkingStationCount === 0) {
+        coordsDisplay.innerText = "No parking stations found nearby. Try increasing the parking distance or adjusting your max rate.";
+      } else {
+        coordsDisplay.innerText = "Click a marker or anywhere on map to choose stop or destination.";
+      }
+
     } catch (err) {
       console.error("Failed to fetch points:", err);
       alert("Error loading nearby points: " + err.message);
